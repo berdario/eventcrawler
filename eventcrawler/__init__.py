@@ -189,7 +189,7 @@ def sample_candidates(links, target_fingerprint):
 def crawl(links, visited, target_fingerprint):
     results = []
     sample_average = sample_candidates(links, target_fingerprint)
-    print('average score:', sample_average, file=stderr)
+    print('selected threshold:', sample_average, file=stderr)
     # if we exhaust the links on the website, we will
     # exit from the loop even with < 10 results
     while len(results) < 10 and len(links - visited) > 0:
