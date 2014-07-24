@@ -81,9 +81,19 @@ def find_parent_page(urlstring):
 
 def find_links(body):
     url = urlparse(body.base_url)
-    base_url = url.scheme + '://' + url.netloc
-    return [n.attrib['href'] for n in body.xpath('.//a[@href]')
-            if n.attrib['href'].startswith(base_url)]
+    domain = url.scheme + '://' + url.netloc
+    def add_base_url(url):
+        if '://' not in url:
+            return urljoin(body.base_url, url)
+        else:
+            return url
+
+    def filter_urls(url):
+        return (url.startswith(domain) or '://' not in url) and \
+            not url.startswith('javascript:') and not url.startswith('mailto:')
+
+    links = map(lambda u: add_base_url(u.attrib['href']), body.xpath('.//a[@href]'))
+    return set(filter(filter_urls, links))
 
 regexps = ['20\d\d', r'\(?\d{3}\)?\-?\s?\d{3}-?\d{4}']
 targets = base_targets + date_targets
