@@ -103,32 +103,86 @@ def fingerprint_page(event_page):
     page_nodes = filter_comments(find_nodes(event_page))
     return {get_hierarchy(node) for node in page_nodes}
 
+
+def levenshtein(s1, s2):
+    """Courtesy of wikibooks: http://en.wikibooks.org/wiki/Algorithm_Implementation/Strings/Levenshtein_distance#Python"""
+    if len(s1) < len(s2):
+        return levenshtein(s2, s1)
+    # len(s1) >= len(s2)
+    if len(s2) == 0:
+        return len(s1)
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1 # j+1 instead of j since previous_row and current_row are one character longer
+            deletions = current_row[j] + 1       # than s2
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    return previous_row[-1]
+
+def score_candidate(page, target_fingerprint):
+    fingerprint = fingerprint_page(page)
+    d1 = target_fingerprint - fingerprint or {min(fingerprint, key=len)}
+    d2 = fingerprint - target_fingerprint or {min(target_fingerprint, key=len)}
+    distance = None
+    #print(len(d1), len(d2))
+    if len(d1)*len(d2) < 37:
+        distance = sum(min(levenshtein(x,y) for y in d2) for x in d1)
+        if 'events' in urlparse(page.base_url).path:
+            distance /= 2
+    print('distance:', distance, 'url:', page.base_url)
+    return distance
+
+def sample_candidates(links, target_fingerprint):
+    samples = []
+    while links:
+        new_links = set()
+        for url in links:
+            page = blocking_download(url)
+            new_links.update(find_links(page))
+            sample = score_candidate(page, target_fingerprint)
+            if sample is not None:
+                samples.append(sample)
+            if len(samples) == 5:
+                return max(sum(samples)/5, 10)
+        else:
+            links = new_links
+
 @coroutine
 def crawl(links, visited, target_fingerprint):
     results = []
-    while len(results) < 10 and len(links-visited) > 0:
-        pages = as_completed([async(download(url)) for url in links - visited])
+    sample_average = sample_candidates(links, target_fingerprint)
+    print('average score:', sample_average)
+    while len(results) < 10 and len(links - visited) > 0:
+        pages = as_completed([download(url) for url in links - visited])
         visited.update(links)
         links = set()
         for future_page in pages:
             page = yield from future_page
-            print('diff: ', target_fingerprint ^ fingerprint_page(page))
-            if target_fingerprint == fingerprint_page(page):
-
+            if page is None:
+                continue
+            score = score_candidate(page, target_fingerprint)
+            if score is not None and score < sample_average:
+                #print('found! ', page.base_url)
                 results.append(page.base_url)
             links.update(find_links(page))
     return results
 
 @coroutine
 def async_main():
-    event_url = 'http://www.workshopsf.org/?page_id=140&id=1328'
+    event_url = 'http://www.sfmoma.org/exhib_events/exhibitions/513'
+    #'http://www.sfmoma.org/exhib_events/exhibitions/513'
+    #'http://calendar.boston.com/lowell_ma/events/show/274127485-mrt-presents-shakespeares-will'
     #'http://events.stanford.edu/events/353/35309/'
+    #'http://www.workshopsf.org/?page_id=140&id=1328'
     future_event_page = async(download(event_url))
     future_event_parent = async(find_parent_page(event_url))
     event_page = yield from future_event_page
     event_parent = yield from future_event_parent
     fingerprint = fingerprint_page(event_page)
-    links = set(find_links(event_parent))
+    links = find_links(event_parent)
     result = yield from crawl(links, {event_url}, fingerprint)
     return result
 
