@@ -47,16 +47,24 @@ def get_hierarchy(node):
         parent = parent.getparent()
     return ">".join(get_numbered_tag(node) for node in reversed(parents))
 
-@coroutine
-def download(url):
-    return html.parse(urlopen(url)).find('body')
+def blocking_download(url):
+    try:
+        return html.parse(urlopen(url)).find('body')
+    except HTTPError as e:
+        if e.code == 404:
+            print(url, 'was a 404')
+            return
+        else:
+            raise
+
+download = coroutine(blocking_download)
 
 @coroutine
 def find_parent_page(urlstring):
     response = None
     url = urlparse(urlstring)
     base_url = url.scheme + '://' + url.netloc
-    splitted_path = url.path.split('/')
+    splitted_path = [s for s in url.path.split('/') if s]
     if not url.query:
         splitted_path = splitted_path[:-1]
     while not response:
