@@ -1,4 +1,5 @@
 import re
+from sys import argv, stderr
 from collections import deque
 from functools import partial
 from urllib.parse import urlparse, urljoin
@@ -61,9 +62,12 @@ def get_hierarchy(node):
 def blocking_download(url):
     try:
         return html.parse(urlopen(url)).find('body')
+        # should add user agent
+        # and also we should honor the robots.txt
+        # and care about rate limiting
     except HTTPError as e:
         if e.code == 404:
-            print(url, 'was a 404')
+            print(url, 'was a 404', file=stderr)
             return
         else:
             raise
@@ -157,7 +161,7 @@ def score_candidate(page, target_fingerprint):
         distance = sum(min(levenshtein(x, y) for y in d2) for x in d1)
         if 'events' in urlparse(page.base_url).path:
             distance /= 2
-    print('distance:', distance, 'url:', page.base_url)
+    print('distance:', distance, 'url:', page.base_url, file=stderr)
     return distance
 
 
@@ -185,7 +189,7 @@ def sample_candidates(links, target_fingerprint):
 def crawl(links, visited, target_fingerprint):
     results = []
     sample_average = sample_candidates(links, target_fingerprint)
-    print('average score:', sample_average)
+    print('average score:', sample_average, file=stderr)
     # if we exhaust the links on the website, we will
     # exit from the loop even with < 10 results
     while len(results) < 10 and len(links - visited) > 0:
@@ -199,18 +203,13 @@ def crawl(links, visited, target_fingerprint):
             score = score_candidate(page, target_fingerprint)
             if score is not None and score < sample_average:
                 # a running average might be better, but this will do for now
-                results.append(page.base_url)
+                results.append((score, page.base_url))
             links.update(find_links(page))
-    return results
+    return [url for score, url in sorted(results)]
 
 
 @coroutine
-def async_main():
-    event_url = 'http://www.sfmoma.org/exhib_events/exhibitions/513'
-    #'http://www.sfmoma.org/exhib_events/exhibitions/513'
-    #'http://calendar.boston.com/lowell_ma/events/show/274127485-mrt-presents-shakespeares-will'
-    #'http://events.stanford.edu/events/353/35309/'
-    #'http://www.workshopsf.org/?page_id=140&id=1328'
+def async_main(event_url):
     future_event_page = async(download(event_url))
     future_event_parent = async(find_parent_page(event_url))
     event_page = yield from future_event_page
@@ -221,6 +220,10 @@ def async_main():
     return result
 
 
+def search_events(page):
+    return list(get_event_loop().run_until_complete(async_main(page)))
+
+
 def main():
-    hits = list(get_event_loop().run_until_complete(async_main()))
-    print(*hits, sep='\n')
+    hits = search_events(argv[1])
+    print(*hits[:10], sep='\n')
